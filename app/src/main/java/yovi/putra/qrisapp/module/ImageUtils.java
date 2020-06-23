@@ -1,0 +1,772 @@
+package yovi.putra.qrisapp.module;
+
+import android.Manifest;
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.ContentValues;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.drawable.Drawable;
+import android.media.ExifInterface;
+import android.media.MediaScannerConnection;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.MediaStore;
+import android.util.Base64;
+import android.util.Log;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+
+@SuppressLint("SdCardPath")
+public class ImageUtils {
+    Context context;
+    private Activity current_activity;
+    private ImageAttachmentListener imageAttachment_callBack;
+    private String selected_path = "";
+    private Uri imageUri;
+    private File path = null;
+    private int from = 0;
+
+    private int maxHeight = 240;
+    private int maxWidth = 240;
+    private int imgQuality = 20;
+
+    public ImageUtils(Activity act) {
+        this.context = act;
+        this.current_activity = act;
+
+        try{
+            imageAttachment_callBack = (ImageAttachmentListener) current_activity;
+        }catch (Exception e){
+            Log.e(ImageUtils.class.getSimpleName(),"Image attactment not implement on your activity");
+        }
+    }
+
+    public int getFrom() {
+        return from;
+    }
+
+    public void setFrom(int from) {
+        this.from = from;
+    }
+
+    /**
+     * Get file name from path
+     *
+     * @param path
+     * @return
+     */
+
+    public String getfilename_from_path(String path) {
+        return path.substring(path.lastIndexOf('/') + 1, path.length());
+
+    }
+
+    /**
+     * Get Image URI from Bitmap
+     *
+     * @param context
+     * @param photo
+     * @return
+     */
+
+    public Uri getImageUri(Context context, Bitmap photo) {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        photo.compress(Bitmap.CompressFormat.JPEG, imgQuality, bytes);
+        String path = MediaStore.Images.Media.insertImage(context.getContentResolver(), photo, "title_bsd_cash", null);
+        return Uri.parse(path);
+    }
+
+    /**
+     * Get Path from Image URI
+     *
+     * @param uri
+     * @return
+     */
+
+    public String getPath(Uri uri) {
+        String[] projection = {MediaStore.Images.Media.DATA};
+        Cursor cursor = this.context.getContentResolver().query(uri, projection, null, null, null);
+        int column_index = 0;
+        if (cursor != null) {
+            column_index = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA);
+            cursor.moveToFirst();
+            String path = cursor.getString(column_index);
+            cursor.close();
+            return path;
+        } else
+            return uri.getPath();
+    }
+
+    /**
+     * Bitmap from String
+     *
+     * @param encodedString
+     * @return
+     */
+    public Bitmap StringToBitMap(String encodedString) {
+        try {
+            byte[] encodeByte = Base64.decode(encodedString, Base64.DEFAULT);
+            Bitmap bitmap = BitmapFactory.decodeByteArray(encodeByte, 0, encodeByte.length);
+            return bitmap;
+        } catch (Exception e) {
+            e.getMessage();
+            return null;
+        }
+    }
+
+
+    /**
+     * Get String from Bitmap
+     *
+     * @param bitmap
+     * @return
+     */
+
+    public String BitMapToString(Bitmap bitmap) {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        bitmap.compress(Bitmap.CompressFormat.JPEG, imgQuality, baos);
+        byte[] b = baos.toByteArray();
+        String temp = Base64.encodeToString(b, Base64.DEFAULT);
+        return temp;
+    }
+
+
+    /**
+     * Check Camera Availability
+     *
+     * @return
+     */
+
+    public boolean isDeviceSupportCamera() {
+        if (this.context.getPackageManager().hasSystemFeature(
+                PackageManager.FEATURE_CAMERA_ANY)) {
+            // this device has a camera
+            return true;
+        } else {
+            // no camera on this device
+            return false;
+        }
+    }
+
+
+    /**
+     * Compress Imgae
+     *
+     * @param imageUri
+     * @param height
+     * @param width
+     * @return
+     */
+
+
+    public Bitmap compressImage(String imageUri, float height, float width) {
+
+        String filePath = getRealPathFromURI(imageUri);
+        Bitmap scaledBitmap = null;
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+
+        // by setting this field as true, the actual bitmap pixels are not loaded in the memory. Just the bounds are loaded. If
+        // you try the use the bitmap here, you will get null.
+
+        options.inJustDecodeBounds = true;
+        Bitmap bmp = BitmapFactory.decodeFile(filePath, options);
+
+        int actualHeight = options.outHeight;
+        int actualWidth = options.outWidth;
+
+        // max Height and width values of the compressed image is taken as 816x612
+
+        float imgRatio = actualWidth / actualHeight;
+        float maxRatio = width / height;
+
+        // width and height values are set maintaining the aspect ratio of the image
+
+        if (actualHeight > height || actualWidth > width) {
+            if (imgRatio < maxRatio) {
+                imgRatio = height / actualHeight;
+                actualWidth = (int) (imgRatio * actualWidth);
+                actualHeight = (int) height;
+            } else if (imgRatio > maxRatio) {
+                imgRatio = width / actualWidth;
+                actualHeight = (int) (imgRatio * actualHeight);
+                actualWidth = (int) width;
+            } else {
+                actualHeight = (int) height;
+                actualWidth = (int) width;
+
+            }
+        }
+
+        //  setting inSampleSize value allows to load a scaled down version of the original image
+
+        options.inSampleSize = calculateInSampleSize(options, actualWidth, actualHeight);
+
+        //  inJustDecodeBounds set to false to load the actual bitmap
+        options.inJustDecodeBounds = false;
+
+        // this options allow android to claim the bitmap memory if it runs low on memory
+
+        options.inPurgeable = true;
+        options.inInputShareable = true;
+        options.inTempStorage = new byte[16 * 1024];
+
+        try {
+            //  load the bitmap from its path
+            bmp = BitmapFactory.decodeFile(filePath, options);
+        } catch (OutOfMemoryError exception) {
+            exception.printStackTrace();
+
+        }
+        try {
+            scaledBitmap = Bitmap.createBitmap(actualWidth, actualHeight, Bitmap.Config.ARGB_8888);
+        } catch (OutOfMemoryError exception) {
+            exception.printStackTrace();
+        }
+
+        float ratioX = actualWidth / (float) options.outWidth;
+        float ratioY = actualHeight / (float) options.outHeight;
+        float middleX = actualWidth / 2.0f;
+        float middleY = actualHeight / 2.0f;
+
+        Matrix scaleMatrix = new Matrix();
+        scaleMatrix.setScale(ratioX, ratioY, middleX, middleY);
+
+        Canvas canvas = new Canvas(scaledBitmap);
+        canvas.setMatrix(scaleMatrix);
+        canvas.drawBitmap(bmp, middleX - bmp.getWidth() / 2, middleY - bmp.getHeight() / 2, new Paint(Paint.FILTER_BITMAP_FLAG));
+
+        // check the rotation of the image and display it properly
+
+        ExifInterface exif;
+        try {
+            exif = new ExifInterface(filePath);
+
+            int orientation = exif.getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION, 0);
+            Log.d("EXIF", "Exif: " + orientation);
+            Matrix matrix = new Matrix();
+            if (orientation == 6) {
+                matrix.postRotate(90);
+                Log.d("EXIF", "Exif: " + orientation);
+            } else if (orientation == 3) {
+                matrix.postRotate(180);
+                Log.d("EXIF", "Exif: " + orientation);
+            } else if (orientation == 8) {
+                matrix.postRotate(270);
+                Log.d("EXIF", "Exif: " + orientation);
+            }
+            scaledBitmap = Bitmap.createBitmap(scaledBitmap, 0, 0, scaledBitmap.getWidth(), scaledBitmap.getHeight(), matrix,
+                    true);
+
+            return scaledBitmap;
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    /**
+     * Get RealPath from Content URI
+     *
+     * @param contentURI
+     * @return
+     */
+    private String getRealPathFromURI(String contentURI) {
+        Uri contentUri = Uri.parse(contentURI);
+        Cursor cursor = context.getContentResolver().query(contentUri, null, null, null, null);
+        if (cursor == null) {
+            return contentUri.getPath();
+        } else {
+            cursor.moveToFirst();
+            int index = cursor.getColumnIndex(MediaStore.Images.ImageColumns.DATA);
+            return cursor.getString(index);
+        }
+    }
+
+
+    /**
+     * ImageSize Calculation
+     *
+     * @param options
+     * @param reqWidth
+     * @param reqHeight
+     * @return
+     */
+
+    public int calculateInSampleSize(BitmapFactory.Options options, int reqWidth, int reqHeight) {
+        final int height = options.outHeight;
+        final int width = options.outWidth;
+        int inSampleSize = 1;
+
+        if (height > reqHeight || width > reqWidth) {
+            final int heightRatio = Math.round((float) height / (float) reqHeight);
+            final int widthRatio = Math.round((float) width / (float) reqWidth);
+            inSampleSize = heightRatio < widthRatio ? heightRatio : widthRatio;
+        }
+        final float totalPixels = width * height;
+        final float totalReqPixelsCap = reqWidth * reqHeight * 2;
+        while (totalPixels / (inSampleSize * inSampleSize) > totalReqPixelsCap) {
+            inSampleSize++;
+        }
+
+        return inSampleSize;
+    }
+
+    /**
+     * Launch Camera
+     *
+     * @param from
+     */
+
+    public void launchCamera(int from) {
+        this.from = from;
+
+        if (Build.VERSION.SDK_INT >= 23) {
+            permission_check(1);
+        } else {
+            camera_call();
+        }
+    }
+
+    /**
+     * Launch Gallery
+     *
+     * @param from
+     */
+
+    public void launchGallery(int from) {
+
+        this.from = from;
+
+        if (Build.VERSION.SDK_INT >= 23) {
+            permission_check(2);
+        } else {
+            galley_call();
+        }
+    }
+
+    /**
+     * Show AlertDialog with the following options
+     * <p>
+     * Camera
+     * Gallery
+     *
+     * @param from
+     */
+
+    public void imagepicker(final int from) {
+        this.from = from;
+
+        final CharSequence[] items;
+
+        if (isDeviceSupportCamera()) {
+            items = new CharSequence[2];
+            items[0] = "Camera";
+            items[1] = "Gallery";
+        } else {
+            items = new CharSequence[1];
+            items[0] = "Gallery";
+        }
+
+        android.app.AlertDialog.Builder alertdialog = new android.app.AlertDialog.Builder(current_activity);
+        alertdialog.setTitle("Add Image");
+        alertdialog.setItems(items, (dialog, item) -> {
+            if (items[item].equals("Camera")) {
+                launchCamera(from);
+            } else if (items[item].equals("Gallery")) {
+                launchGallery(from);
+            }
+        });
+        alertdialog.show();
+    }
+
+    /**
+     * Check permission
+     *
+     * @param code
+     */
+
+    public void permission_check(final int code) {
+        int hasWriteContactsPermission = ContextCompat.checkSelfPermission(current_activity,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE);
+
+        if (hasWriteContactsPermission != PackageManager.PERMISSION_GRANTED) {
+            if (!ActivityCompat.shouldShowRequestPermissionRationale(current_activity,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+
+                showMessageOKCancel("For adding images , You need to provide permission to access your files",
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+
+                                ActivityCompat.requestPermissions(current_activity,
+                                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                                        code);
+                            }
+                        });
+                return;
+            }
+
+            ActivityCompat.requestPermissions(current_activity,
+                    new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    code);
+            return;
+        }
+
+        if (code == 1)
+            camera_call();
+        else if (code == 2)
+            galley_call();
+    }
+
+
+    private void showMessageOKCancel(String message, DialogInterface.OnClickListener okListener) {
+        new AlertDialog.Builder(current_activity)
+                .setMessage(message)
+                .setPositiveButton("OK", okListener)
+                .setNegativeButton("Cancel", null)
+                .create()
+                .show();
+    }
+
+
+    /**
+     * Capture image from camera
+     */
+
+    public void camera_call() {
+        ContentValues values = new ContentValues();
+        imageUri = current_activity.getContentResolver().insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+        Intent intent1 = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        intent1.putExtra(MediaStore.EXTRA_OUTPUT, imageUri);
+        current_activity.startActivityForResult(intent1, 0);
+    }
+
+    /**
+     * pick image from Gallery
+     */
+
+    public void galley_call() {
+
+        Intent intent2 = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+        intent2.setType("image/*");
+        current_activity.startActivityForResult(intent2, 1);
+
+    }
+
+
+    /**
+     * Activity PermissionResult
+     *
+     * @param requestCode
+     * @param permissions
+     * @param grantResults
+     */
+    public void request_permission_result(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        switch (requestCode) {
+            case 1:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    camera_call();
+                } else {
+                    Toast.makeText(current_activity, "Permission denied", Toast.LENGTH_LONG).show();
+                }
+                break;
+
+            case 2:
+                // If request is cancelled, the result arrays are empty.
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    galley_call();
+                } else {
+
+                    Toast.makeText(current_activity, "Permission denied", Toast.LENGTH_LONG).show();
+                }
+                break;
+        }
+    }
+
+
+    /**
+     * Intent ActivityResult
+     *
+     * @param requestCode
+     * @param resultCode
+     * @param data
+     */
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        String file_name;
+        Bitmap bitmap;
+
+        switch (requestCode) {
+            case 0:
+
+                if (resultCode == Activity.RESULT_OK) {
+
+                    Log.i("Camera Selected", "Photo");
+
+                    try {
+                        selected_path = null;
+                        selected_path = getPath(imageUri);
+                        // Log.i("selected","path"+selected_path);
+                        file_name = selected_path.substring(selected_path.lastIndexOf("/") + 1);
+                        // Log.i("file","name"+file_name);
+                        bitmap = compressImage(imageUri.toString(), maxHeight, maxWidth);
+
+                        if(imageAttachment_callBack != null)
+                            imageAttachment_callBack.image_attachment(from, file_name, bitmap, imageUri);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+
+
+                }
+                break;
+            case 1:
+                if (resultCode == Activity.RESULT_OK) {
+                    Log.i("Gallery", "Photo");
+                    Uri selectedImage = data.getData();
+
+                    try {
+                        selected_path = null;
+                        selected_path = getPath(selectedImage);
+                        file_name = selected_path.substring(selected_path.lastIndexOf("/") + 1);
+                        bitmap = compressImage(selectedImage.toString(), maxHeight, maxWidth);
+                        if(imageAttachment_callBack != null)
+                            imageAttachment_callBack.image_attachment(from, file_name, bitmap, selectedImage);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+
+
+                }
+                break;
+        }
+
+
+    }
+
+    /**
+     * Get image from Uri
+     *
+     * @param uri
+     * @param height
+     * @param width
+     * @return
+     */
+    public Bitmap getImage_FromUri(Uri uri, float height, float width) {
+        Bitmap bitmap = null;
+
+        try {
+            bitmap = compressImage(uri.toString(), height, width);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return bitmap;
+    }
+
+    /**
+     * Get filename from URI
+     *
+     * @param uri
+     * @return
+     */
+    public String getFileName_from_Uri(Uri uri) {
+        String path = null, file_name = null;
+
+        try {
+
+            path = getRealPathFromURI(uri.getPath());
+            file_name = path.substring(path.lastIndexOf("/") + 1);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+
+        return file_name;
+
+    }
+
+
+    /**
+     * Check Image Exist (or) Not
+     *
+     * @param file_name
+     * @param file_path
+     * @return
+     */
+
+    public boolean checkimage(String file_name, String file_path) {
+        boolean flag;
+        path = new File(file_path);
+
+        File file = new File(path, file_name);
+        if (file.exists()) {
+            Log.i("file", "exists");
+            flag = true;
+        } else {
+            Log.i("file", "not exist");
+            flag = false;
+        }
+
+        return flag;
+    }
+
+
+    /**
+     * Get Image from the given path
+     *
+     * @param file_name
+     * @param file_path
+     * @return
+     */
+
+    public Bitmap getImage(String file_name, String file_path) {
+
+        path = new File(file_path);
+        File file = new File(path, file_name);
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        options.inSampleSize = 2;
+        options.inTempStorage = new byte[16 * 1024];
+
+        Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+
+        if (bitmap != null)
+            return bitmap;
+        else
+            return null;
+    }
+
+    /**
+     * Create an image
+     *
+     * @param bitmap
+     * @param file_name
+     * @param filepath
+     * @param file_replace
+     */
+
+
+    public File createImage(Bitmap bitmap, String file_name, String filepath, boolean file_replace) {
+
+        path = new File(filepath);
+
+        if (!path.exists()) {
+            path.mkdirs();
+        }
+
+        File file = new File(path, file_name);
+
+        if (file.exists()) {
+            if (file_replace) {
+                file.delete();
+                file = new File(path, file_name);
+                store_image(file, bitmap);
+                Log.i("file", "replaced");
+            }
+        } else {
+            store_image(file, bitmap);
+        }
+        return file;
+    }
+
+
+    /**
+     * @param file
+     * @param bmp
+     */
+    public void store_image(File file, Bitmap bmp) {
+        try {
+            FileOutputStream out = new FileOutputStream(file);
+            bmp.compress(Bitmap.CompressFormat.JPEG, imgQuality, out);
+            out.flush();
+            out.close();
+            MediaScannerConnection.scanFile(current_activity, new String[] { file.getPath() }, new String[] { "image/jpeg" }, null);
+
+            if(imageAttachment_callBack != null)
+                imageAttachment_callBack.image_attachment(from,file.getName(),bmp,imageUri);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private int getViewWidth(View v) {
+        return v.getWidth();
+    }
+
+    private int getViewHeight(View v) {
+        if (v instanceof ViewGroup) {
+            return ((ViewGroup)v).getChildAt(0).getHeight();
+        } else {
+            return v.getHeight();
+        }
+    }
+
+    public Bitmap viewToBitmap(View view) {
+        Bitmap bitmap = Bitmap.createBitmap(getViewWidth(view), getViewHeight(view), Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        Drawable bgDrawable = view.getBackground();
+        if (bgDrawable != null)
+            bgDrawable.draw(canvas);
+        else
+            canvas.drawColor(Color.WHITE);
+        view.draw(canvas);
+        return bitmap;
+    }
+
+    public Bitmap viewToBitmap(int layoutId) {
+        return viewToBitmap(current_activity.findViewById(layoutId));
+    }
+
+    public void takeScreenshot(Bitmap bmp, String imagePath, int request_code) {
+        setFrom(request_code);
+        store_image(new File(imagePath), bmp);
+    }
+
+    public void takeScreenshot(int layoutId, String imagePath, int request_code){
+        Bitmap bmp = viewToBitmap(layoutId);
+        takeScreenshot(bmp, imagePath, request_code);
+    }
+
+    public Bitmap mergeViewForReceipt(View vHeader, View vBody) {
+        Bitmap header = viewToBitmap(vHeader);
+        Bitmap body = viewToBitmap(vBody);
+        Bitmap result = Bitmap.createBitmap(
+                body.getWidth(),
+                header.getHeight() + body.getHeight(),
+                body.getConfig());
+        Canvas canvas = new Canvas(result);
+        canvas.drawBitmap(header, 0,0, null);
+        canvas.drawBitmap(body, 0,header.getHeight(), null);
+        return result;
+    }
+
+    public interface ImageAttachmentListener {
+        public void image_attachment(int from, String filename, Bitmap file, Uri uri);
+    }
+}
